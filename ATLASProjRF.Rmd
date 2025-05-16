@@ -1,0 +1,281 @@
+---
+title: "ATLAS Project Random Forest"
+output: html_document
+date: "2025-03-06"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Library packages, set the seed
+```{r}
+set.seed(123)
+library(tidyverse)
+library(ggplot2)
+library(randomForest)
+library(dplyr)
+library(MASS)
+library(caret)
+```
+
+
+loading dataset
+```{r}
+obesity <- read.csv("obesity_dataset.csv")
+# view(obesity)
+```
+
+```{r}
+obesity_levels <- c("Insufficient_Weight", 
+                    "Normal_Weight", 
+                    "Overweight_Level_I", 
+                    "Overweight_Level_II",
+                    "Obesity_Type_I",
+                    "Obesity_Type_II",
+                    "Obesity_Type_III")
+
+ob_levels <-  factor(c("Insufficient_Weight", 
+                    "Normal_Weight", 
+                    "Overweight", 
+                    "Obesity_Type_I",
+                    "Obesity_Type_II",
+                    "Obesity_Type_III"))
+freq_levels <- c(
+  "no",
+  "Sometimes",
+  "Frequently",
+  "Always"
+)
+
+yes_no_levels <- c("no", "yes")
+
+
+ob_fct_default <- obesity %>% 
+  mutate(NObeyesdad = factor(obesity$NObeyesdad, levels= obesity_levels)) %>% 
+  mutate(CAEC = factor(CAEC, levels = freq_levels)) %>% 
+  mutate(CALC = factor(CALC, levels= freq_levels)) %>%
+  dplyr::select(-c("Height", "Weight", "MTRANS", "Gender", "SMOKE", "SCC", "NCP", "TUE")) %>% 
+  rename(family_history = family_history_with_overweight) %>% 
+  rename(high_calorie = FAVC) %>% 
+  rename(alcohol = CALC) %>% 
+  # rename(tech_use = TUE) %>% 
+  rename(physical_activity = FAF) %>% 
+  # rename(num_meals = NCP) %>% 
+  rename(veggies = FCVC) %>% 
+  rename(water = CH2O) %>% 
+  rename(eat_between_meals = CAEC) %>% 
+  mutate(NObeyesdad = fct_collapse(NObeyesdad, Overweight = c("Overweight_Level_I", "Overweight_Level_II")))
+```
+
+
+trying random forest...
+split data into train and test:
+using about 75% of the rows as training data, and 25% as the testing data.
+
+```{r}
+ob_fct_default <- tibble::rowid_to_column(ob_fct_default, "ID")
+
+train_temp <- ob_fct_default %>% dplyr::sample_frac(0.75)
+test  <- dplyr::anti_join(ob_fct_default, train, by = 'ID')
+
+train <- train_temp %>% dplyr::select(-c("ID", "NObeyesdad"))
+```
+
+Trying to predict obesity level, excluding Height, Weight, MTRANS, Gender, NCP, and TUE.
+
+
+```{r}
+samp <- rep(200, 6)
+ob_rf <- randomForest(x = train, 
+                      y = train_temp$NObeyesdad, 
+                      ntree = 700, 
+                      importance = TRUE, 
+                      strata = ob_levels,
+                      sampsize = samp
+                      )
+p <- varImpPlot(ob_rf, type=1) # Permutation test
+
+newdata = test %>% dplyr::select(-c("ID", "NObeyesdad"))
+prediction <- predict(ob_rf, newdata = newdata)
+
+test_residual <- data.frame(prediction, as.integer(prediction), test$NObeyesdad, as.integer(test$NObeyesdad))
+
+test_residual <- test_residual %>%
+  mutate(res = abs(as.integer.prediction. - as.integer.test.NObeyesdad.))
+
+MAE <- mean(test_residual$res)
+(MAE)
+```
+Accuracy: 
+
+```{r}
+(nrow(test_residual[test_residual$res == 0,]) / nrow(test_residual))
+```
+
+ALT sample
+
+```{r}
+ob_fct_d <- obesity %>% 
+  mutate(NObeyesdad = factor(obesity$NObeyesdad, levels= obesity_levels)) %>% 
+  mutate(CAEC = factor(CAEC, levels = freq_levels)) %>% 
+  mutate(CALC = factor(CALC, levels= freq_levels)) %>%
+  dplyr::select(-c("Height", "Weight", "MTRANS", "Gender", "SMOKE", "SCC", "NCP", "TUE")) %>% 
+  rename(family_history = family_history_with_overweight) %>% 
+  rename(age = Age) %>% 
+  rename(high_calorie = FAVC) %>% 
+  rename(alcohol = CALC) %>% 
+  rename(physical_activity = FAF) %>% 
+  rename(veggies = FCVC) %>% 
+  rename(water = CH2O) %>% 
+  rename(eat_between_meals = CAEC) %>% 
+  mutate(NObeyesdad = fct_collapse(NObeyesdad, Overweight = c("Overweight_Level_I", "Overweight_Level_II")))
+
+ob_fct_d <- tibble::rowid_to_column(ob_fct_d, "ID")
+
+train_d <- ob_fct_d %>% dplyr::sample_frac(0.75)
+test_d  <- dplyr::anti_join(ob_fct_d, train_d, by = 'ID')
+
+well_sample <- rbind(
+  dplyr::sample_n(train_d %>% dplyr::filter(NObeyesdad == "Insufficient_Weight"), 200, replace = T),
+  dplyr::sample_n(train_d %>% dplyr::filter(NObeyesdad == "Normal_Weight"), 200, replace = T),
+  dplyr::sample_n(train_d %>% dplyr::filter(NObeyesdad == "Overweight"), 200, replace = T),
+  dplyr::sample_n(train_d %>% dplyr::filter(NObeyesdad == "Obesity_Type_I"), 200, replace = T),
+  dplyr::sample_n(train_d %>% dplyr::filter(NObeyesdad == "Obesity_Type_II"), 200, replace = T),
+  dplyr::sample_n(train_d %>% dplyr::filter(NObeyesdad == "Obesity_Type_III"), 200, replace = T)
+)
+
+ob_rf_d <- randomForest(x = well_sample %>% dplyr::select(-NObeyesdad, -ID), 
+                      y = well_sample$NObeyesdad, 
+                      ntree = 700, 
+                      importance = TRUE
+                      )
+p_d <- varImpPlot(ob_rf_d, type=1) # Permutation test
+
+newdata_d = test_d %>% dplyr::select(-ID, -NObeyesdad)
+prediction_d <- predict(ob_rf_d, newdata = newdata_d)
+
+test_residual_d <- data.frame(prediction_d, as.integer(prediction_d), test_d$NObeyesdad, as.integer(test_d$NObeyesdad))
+
+test_residual_d <- test_residual_d %>%
+  mutate(res = abs(as.integer.prediction_d. - as.integer.test_d.NObeyesdad.))
+
+MAE <- mean(test_residual_d$res)
+(MAE)
+
+(nrow(test_residual_d[test_residual_d$res == 0,]) / nrow(test_residual_d))
+
+```
+Counterfactuals
+
+```{r}
+library(iml)
+library(counterfactuals)
+
+predictor <- iml::Predictor$new(ob_rf_d, type = "prob", data = newdata_d[-169,])
+predictor$predict(newdata_d[-169,])
+
+moc_classif <- MOCClassif$new(
+  predictor, epsilon = 0, fixed_features = c("age", "family_history"), 
+  quiet = TRUE, termination_crit = "genstag", n_generations = 10L
+)
+
+cfactuals <- moc_classif$find_counterfactuals(
+  newdata_d[169, ], desired_class = "Normal_Weight", desired_prob = c(0.6, 1)
+)
+cfactuals$subset_to_valid()
+
+print(cfactuals)
+
+head(cfactuals$predict(), 3L)
+
+cfactuals$plot_freq_of_feature_changes(subset_zero = TRUE)
+
+head(cfactuals$evaluate(show_diff = TRUE, 
+  measures = c("dist_x_interest", "dist_target", "no_changed", "dist_train")), 3L)
+
+change <- cfactuals$evaluate(show_diff = TRUE, 
+  measures = c("dist_x_interest", "dist_target", "no_changed", "dist_train"))
+
+
+extract_meaningful_vars <- function(df) {
+  
+  vars <- c("age", "family_history", "high_calorie", "veggies", "eat_between_meals", "water", "physical_activity", "alcohol");
+  important_vars <- c()
+  
+  for(var in vars) {
+    if( (sum(is.na(df %>% dplyr::select(all_of(var)))) / nrow(df)) < 0.70 ) {
+      important_vars <- append(important_vars, var)
+    }
+  }
+  return(important_vars)
+}
+
+library(modelr)
+ extract_recommendation <- function(df, vars) {
+   recommendations <- c()
+   for(var in vars) {
+     if(typeof( unlist( na.omit(df %>% dplyr::select(all_of(var))) )) == "double" ) {
+       t <- unlist( na.omit(df %>% dplyr::select(all_of(var))) )
+       ifelse(mean(t) > 0, 
+              recommendations <- append(recommendations, sprintf("increase %s", var)), 
+              recommendations <- append(recommendations, sprintf("decrease %s", var)))
+     } else {
+       q <- unlist( na.omit(df %>% dplyr::select(all_of(var))))
+       recommendations <- append(recommendations, sprintf("change %s to %s", var, typical(unlist(q))))
+     }
+   }
+   return(recommendations)
+ }
+ 
+ extract_counterfactuals <- function(newdata) {
+   moc_classif <- MOCClassif$new(
+    predictor, epsilon = 0, fixed_features = c("age", "family_history"),
+    quiet = TRUE, termination_crit = "genstag", n_generations = 10L
+  )
+  cfactuals <- moc_classif$find_counterfactuals(
+    newdata, desired_class = "Normal_Weight", desired_prob = c(0.6, 1)
+  )
+  cfactuals$subset_to_valid()
+  change <- cfactuals$evaluate(show_diff = TRUE,
+                               measures = c("dist_x_interest", "dist_target", "no_changed", "dist_train"))
+  pred <- predict(ob_rf_d, newdata)
+  plot <- cfactuals$plot_freq_of_feature_changes(subset_zero = TRUE)
+  recs <- extract_recommendation(change, extract_meaningful_vars(change))
+  return(list(pred = pred, plot = plot, recs = recs))
+ }
+
+```
+
+
+Partial dependence plots
+```{r}
+veggis_pdp <- partialPlot(ob_rf_d, train_d %>% dplyr::select(-c("ID", "NObeyesdad")), "veggies", 
+                          ylab = "Impact on Obesity Level", xlab = "vegetable consumption")
+
+age_pdp <- partialPlot(ob_rf_d, train_d %>% dplyr::select(-c("ID", "NObeyesdad")), "age", 
+                       ylab = "Impact on Obesity Level", xlab = "age")
+
+history_pdp <- partialPlot(ob_rf, train %>% dplyr::select(-c("ID", "NObeyesdad")), "family_history_with_overweight", 
+                       ylab = "Impact on Obesity Level", xlab = "Family History")
+
+pdp_result <- pdp::partial(ob_rf, pred.var = "family_history_with_overweight", grid.resolution = 50)
+pdp_result <- pdp::partial(ob_rf, pred.var = "family_history_with_overweight", plot = TRUE, which.class = 1)
+
+num_meals_pdp <- partialPlot(ob_rf, train %>% dplyr::select(-c("ID", "NObeyesdad")), "NCP", 
+                       ylab = "Impact on Obesity Level", xlab = "Number of Daily Meals")
+
+phys_pdp <- partialPlot(ob_rf_d, train_d %>% dplyr::select(-c("ID", "NObeyesdad")), "physical_activity", 
+                       ylab = "Impact on Obesity Level", xlab = "physical_activity")
+
+water_pdp <- partialPlot(ob_rf_d, train_d %>% dplyr::select(-c("ID", "NObeyesdad")), "water", 
+                       ylab = "Impact on Obesity Level", xlab = "Water Consumption")
+
+eat_between_pdp <- partialPlot(ob_rf, train %>% dplyr::select(-c("ID", "NObeyesdad")), "CAEC", 
+                       ylab = "Impact on Obesity Level", xlab = "CAEC")
+
+
+pdp::partial(ob_rf, "FCVC", type = "classification", which.class = "presence", prob = TRUE, rug = T, plot = T)
+```
+
